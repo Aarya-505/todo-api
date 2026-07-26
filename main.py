@@ -60,3 +60,67 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+# Stage 1: Read all tasks from the database
+@app.get("/tasks")
+def get_tasks():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    tasks_list = []
+    for row in rows:
+        tasks_list.append({
+            "id": row["id"],
+            "title": row["title"],
+            "done": bool(row["done"])
+        })
+    return tasks_list
+
+# Stage 1: Read a single task by ID using a parameterized query
+@app.get("/tasks/{task_id}")
+def get_task(task_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "done": bool(row["done"])
+    }
+
+# Stage 2: Create a new task in the database
+@app.post("/tasks", status_code=status.HTTP_201_CREATED)
+def create_task(task_in: TaskCreate):
+    if not task_in.title.strip():
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Insert the new task, letting the database assign the ID and setting done to 0 (false)
+    cursor.execute(
+        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        (task_in.title.strip(), 0)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    
+    # Fetch the newly created task back to return it
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (new_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "done": bool(row["done"])
+    }
