@@ -106,7 +106,6 @@ def create_task(task_in: TaskCreate):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Insert the new task, letting the database assign the ID and setting done to 0 (false)
     cursor.execute(
         "INSERT INTO tasks (title, done) VALUES (?, ?)",
         (task_in.title.strip(), 0)
@@ -114,7 +113,6 @@ def create_task(task_in: TaskCreate):
     conn.commit()
     new_id = cursor.lastrowid
     
-    # Fetch the newly created task back to return it
     cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (new_id,))
     row = cursor.fetchone()
     conn.close()
@@ -124,3 +122,61 @@ def create_task(task_in: TaskCreate):
         "title": row["title"],
         "done": bool(row["done"])
     }
+
+# Stage 3: Update an existing task using SQL UPDATE
+@app.put("/tasks/{task_id}")
+def update_task(task_id: int, task_in: TaskUpdate):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if task exists first
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
+    # Determine updated values (retain existing if not provided)
+    new_title = task_in.title.strip() if task_in.title is not None else row["title"]
+    if task_in.title is not None and not new_title:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+        
+    new_done = int(task_in.done) if task_in.done is not None else row["done"]
+    
+    cursor.execute(
+        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
+        (new_title, new_done, task_id)
+    )
+    conn.commit()
+    
+    # Fetch updated row to return
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    updated_row = cursor.fetchone()
+    conn.close()
+    
+    return {
+        "id": updated_row["id"],
+        "title": updated_row["title"],
+        "done": bool(updated_row["done"])
+    }
+
+# Stage 3: Delete a task using SQL DELETE
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
+    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+    
+    return None
