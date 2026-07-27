@@ -1,30 +1,74 @@
 # FlyRank To-Do CRUD API
 
-A simple, persistent CRUD API built with Python, FastAPI, and SQLite for the FlyRank Backend Track.
+A robust, multi-stage persistent CRUD API built with Python, FastAPI, and relational databases for the FlyRank Backend Track.
 
-## Why SQLite?
-- **Single file & zero setup:** Requires no separate database server installation[cite: 1].
-- **Persistence:** Data outlives program restarts by saving directly to disk in `tasks.db`[cite: 1].
+---
 
-## Database Location
-The database file is created automatically as `tasks.db` on the first application run. It is git-ignored so that every clean clone starts fresh[cite: 1].
+## Project Evolution & Stages
 
-## How to Run
-1. Install dependencies: `pip install fastapi uvicorn`[cite: 1]
-2. Start the server: `uvicorn main:app --reload`[cite: 1]
-3. View the docs at `http://localhost:8000/docs`
+This repository demonstrates incremental backend development from local file-based storage to containerized production databases:
 
-## Endpoints
+* **Stage 1–3:** Built core CRUD endpoints (`GET`, `POST`, `PUT`, `DELETE`), request validation via Pydantic, and parameterized SQL handling.
+* **Stage 4 (SQLite Exploration):** Explored local file-based persistence using SQLite (`tasks.db`) for zero-setup execution.
+* **Stage 5 (Production Migration):** Upgraded the architecture to a containerized **Docker & PostgreSQL** stack to meet advanced environment requirements.
+
+---
+
+## Tech Stack
+* **Framework:** FastAPI (Python)
+* **Server:** Uvicorn
+* **Database (Current):** PostgreSQL 15 (via Docker)
+* **Database (Early Stages):** SQLite (`tasks.db`)
+* **Driver:** `psycopg2-binary`
+
+---
+
+## Getting Started
+
+### 1. Clone the Repository
+```bash
+git clone [https://github.com/Aarya-505/todo-api.git](https://github.com/Aarya-505/todo-api.git)
+cd todo-api
+
+```
+### Set Up Virtual Environment
+```bash
+python -m venv venv
+# On Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+
+```
+### Install Dependencies
+```
+pip install fastapi uvicorn psycopg2-binary
+
+```
+
+### Start the PostgreSQL Docker Container
+
+To run the application with the current PostgreSQL backend, spin up the container mapping port 5433 (or 5432):
+
+```
+docker run --name todo-postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=todo_db -p 5433:5432 -d postgres:15
+
+```
+### Run the Application
+
+```
+uvicorn main:app --reload
+
+```
+
+Access the interactive API documentation at: http://127.0.0.1:8000/docs
+
+### API Endpoints
+
 | HTTP Method | Endpoint | Purpose |
 | ----------- | ----------- | ----------- |
 | GET | `/` | API Metadata |
 | GET | `/health` | Health Check |
 | GET | `/tasks` | List all tasks |
-| GET | `/tasks/{id}` | Get a single task |
+| GET | `/tasks/{id}` | Get a single task by ID |
 | POST | `/tasks` | Create a new task |
-| PUT | `/tasks/{id}` | Update a task |
+| PUT | `/tasks/{id}` | Update an existing task |
 | DELETE | `/tasks/{id}` | Delete a task |
-
-## Example SQL Query (Stage 4)[cite: 1]
-```sql
-SELECT * FROM tasks WHERE done = 1;
