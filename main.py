@@ -1,15 +1,28 @@
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = FastAPI()
 
-# Helper function to connect to our SQLite database
+# PostgreSQL Database Connection parameters from Docker container setup
+DB_HOST = "127.0.0.1"
+DB_PORT = "5433"
+DB_NAME = "todo_db"
+DB_USER = "postgres"
+DB_PASSWORD = "postgres"
+
+# Helper function to connect to our PostgreSQL database
 def get_db_connection():
-    conn = sqlite3.connect("tasks.db")
-    # This row_factory allows us to access columns by name (e.g., task["title"])
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        port=DB_PORT,
+        cursor_factory=RealDictCursor # Allows accessing columns by name like row["title"]
+    )
     return conn
 
 # Initialize the database and seed initial data if empty
@@ -17,10 +30,10 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Create the tasks table if it doesn't exist
+    # Create the tasks table if it doesn't exist (using SERIAL for auto-incrementing ID)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
             done INTEGER NOT NULL DEFAULT 0
         )
@@ -28,7 +41,8 @@ def init_db():
     
     # Check if the table is empty before seeding
     cursor.execute("SELECT COUNT(*) FROM tasks")
-    count = cursor.fetchone()[0]
+    result = cursor.fetchone()
+    count = result['count'] if isinstance(result, dict) else result[0]
     
     if count == 0:
         initial_tasks = [
@@ -36,9 +50,10 @@ def init_db():
             ("Learn FastAPI", 1),
             ("Walk the dog", 0)
         ]
-        cursor.executemany("INSERT INTO tasks (title, done) VALUES (?, ?)", initial_tasks)
+        cursor.executemany("INSERT INTO tasks (title, done) VALUES (%s, %s)", initial_tasks)
         conn.commit()
         
+    cursor.close()
     conn.close()
 
 # Run database initialization on startup
@@ -68,6 +83,7 @@ def get_tasks():
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, done FROM tasks")
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     
     tasks_list = []
@@ -84,8 +100,9 @@ def get_tasks():
 def get_task(task_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if row is None:
@@ -107,14 +124,15 @@ def create_task(task_in: TaskCreate):
     cursor = conn.cursor()
     
     cursor.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id",
         (task_in.title.strip(), 0)
     )
+    new_id = cursor.fetchone()["id"]
     conn.commit()
-    new_id = cursor.lastrowid
     
-    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (new_id,))
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (new_id,))
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     return {
@@ -130,30 +148,33 @@ def update_task(task_id: int, task_in: TaskUpdate):
     cursor = conn.cursor()
     
     # Check if task exists first
-    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
     
     if row is None:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
         
     # Determine updated values (retain existing if not provided)
     new_title = task_in.title.strip() if task_in.title is not None else row["title"]
     if task_in.title is not None and not new_title:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Title cannot be empty")
         
     new_done = int(task_in.done) if task_in.done is not None else row["done"]
     
     cursor.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
+        "UPDATE tasks SET title = %s, done = %s WHERE id = %s",
         (new_title, new_done, task_id)
     )
     conn.commit()
     
     # Fetch updated row to return
-    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (task_id,))
     updated_row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     return {
@@ -168,15 +189,17 @@ def delete_task(task_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT id FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
     
     if row is None:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
         
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
     conn.commit()
+    cursor.close()
     conn.close()
     
     return None
