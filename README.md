@@ -1,10 +1,17 @@
 # FlyRank To-Do CRUD API
 
-A simple, in-memory CRUD API built with Python and FastAPI for the FlyRank Backend Track.
+A simple, persistent CRUD API built with Python, FastAPI, and SQLite for the FlyRank Backend Track.
+
+## Why SQLite?
+- **Single file & zero setup:** Requires no separate database server installation[cite: 1].
+- **Persistence:** Data outlives program restarts by saving directly to disk in `tasks.db`[cite: 1].
+
+## Database Location
+The database file is created automatically as `tasks.db` on the first application run. It is git-ignored so that every clean clone starts fresh[cite: 1].
 
 ## How to Run
-1. Install dependencies: `pip install fastapi uvicorn`
-2. Start the server: `uvicorn main:app --reload`
+1. Install dependencies: `pip install fastapi uvicorn`[cite: 1]
+2. Start the server: `uvicorn main:app --reload`[cite: 1]
 3. View the docs at `http://localhost:8000/docs`
 
 ## Endpoints
@@ -18,14 +25,6 @@ A simple, in-memory CRUD API built with Python and FastAPI for the FlyRank Backe
 | PUT | `/tasks/{id}` | Update a task |
 | DELETE | `/tasks/{id}` | Delete a task |
 
-## Example cURL output
-```bash
-curl.exe -i -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\":\"Buy milk\"}"
-
-HTTP/1.1 201 Created
-date: Sun, 26 Jul 2026 10:29:13 GMT
-server: uvicorn
-content-length: 44
-content-type: application/json
-
-{"id":4,"title":"Buy milk","done":false}
+## Example SQL Query (Stage 4)[cite: 1]
+```sql
+SELECT * FROM tasks WHERE done = 1;
