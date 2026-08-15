@@ -67,10 +67,17 @@ Once the server is running, navigate to http://127.0.0.1:8000/docs. You will see
 Step 1: Log in via POST /auth/login to obtain your access_token.
 Step 2: Click Authorize, paste your token, and test protected routes like /protected/profile and /auth/logout interactively.
 
-<img width="1920" height="1080" alt="Screenshot 2026-08-15 170357" src="https://github.com/user-attachments/assets/780341c0-b2ad-405f-9144-3a3bf4c87433" />
+<img width="1920" height="1080" alt="Swagger UI Bearer Auth" src="https://github.com/user-attachments/assets/14409778-205b-4dc0-a62a-6f3119361301" />
+
 
 ```
-### API Endpoints
-```bash
-HTTP MethodEndpointPurposeSecurity RequirementGET/healthServer health check and Supabase connectivityPublicPOST/auth/signupRegister a new user accountPublicPOST/auth/loginAuthenticate user and return JWT tokensPublicGET/public/infoPublic informational endpointPublicGET/protected/profileRetrieve verified user profile detailsProtected (Bearer Token)POST/auth/logoutTerminate the user session with SupabaseProtected (Bearer Token)
-```
+## API Endpoints
+
+| Method | Endpoint | Description | Access |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Server health check and Supabase connectivity | Public |
+| `POST` | `/auth/signup` | Register a new user account | Public |
+| `POST` | `/auth/login` | Authenticate user and return JWT access tokens | Public |
+| `GET` | `/public/info` | Public informational endpoint | Public |
+| `GET` | `/protected/profile` | Retrieve verified user profile details | Protected (Bearer Token) |
+| `POST` | `/auth/logout` | Terminate the user session with Supabase | Protected (Bearer Token) |
