@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status, Header
+from fastapi import FastAPI, HTTPException, status, Header, Depends
 from pydantic import BaseModel
 from supabase import create_client, Client
 
@@ -60,27 +60,39 @@ def log_in(credentials: AuthCredentials):
 def public_info():
     return {"message": "Welcome stranger! This info is public."}
 
-# Stage 3: Protected Route with Token Verification
-@app.get("/protected/profile", status_code=200)
-def protected_profile(authorization: str = Header(None)):
+# Reusable Auth Dependency (The Guard)
+def get_current_user(authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(
             status_code=401, 
             detail={"error": "Access token required"}
         )
     
-    # Handle both "Bearer <token>" and raw token inputs gracefully
     if authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
     else:
         token = authorization
     
     try:
-        # Ask Supabase to verify the token
         user_response = supabase.auth.get_user(token)
-        return {"user": user_response.user}
-    except Exception as e:
+        return user_response.user
+    except Exception:
         raise HTTPException(
             status_code=401, 
             detail={"error": "Invalid or expired token"}
         )
+
+# Protected Profile Route (Using the reusable dependency)
+@app.get("/protected/profile", status_code=200)
+def protected_profile(current_user = Depends(get_current_user)):
+    return {"user": current_user}
+
+# Stage 4: Protected Logout Route
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def log_out(current_user = Depends(get_current_user)):
+    try:
+        # End the session with Supabase
+        supabase.auth.sign_out()
+        return
+    except Exception:
+        raise HTTPException(status_code=400, detail="Error logging out")
