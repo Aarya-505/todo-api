@@ -67,7 +67,7 @@ Once the server is running, navigate to http://127.0.0.1:8000/docs. You will see
 Step 1: Log in via POST /auth/login to obtain your access_token.
 Step 2: Click Authorize, paste your token, and test protected routes like /protected/profile and /auth/logout interactively.
 
-<img width="1920" height="1080" alt="Swagger UI Bearer Auth" src="https://github.com/user-attachments/assets/14409778-205b-4dc0-a62a-6f3119361301" />
+![Swagger UI Bearer Auth](./Swagger UI Bearer Auth.png)
 
 
 ```
