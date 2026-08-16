@@ -269,4 +269,4 @@ def run_pipeline(inject_fake_url=False):
 
 if __name__ == "__main__":
     # Test normal run first, or pass inject_fake_url=True to test the failure checkpoint!
-    run_pipeline(inject_fake_url=True)
+    run_pipeline(inject_fake_url=False)
