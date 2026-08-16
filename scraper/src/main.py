@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field, HttpUrl, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 # Constants
 BASE_URL = "https://books.toscrape.com/catalogue/"
@@ -29,39 +29,59 @@ class BookRecord(BaseModel):
     source_page: str
     fetched_at: str
 
-def polite_get(url):
-    """Fetch a URL with polite headers, timeout, and status check."""
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=5)
-        if response.status_code != 200:
-            print(f"Failed to fetch {url}. Status code: {response.status_code}")
-            return None
-        return response.text
-    except requests.exceptions.RequestException as e:
-        print(f"Request failed for {url}: {e}")
-        return None
+def polite_get_with_retry(url, max_retries=2):
+    """Fetch a URL with polite headers, timeout, status check, and single retry on 5xx/timeouts."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=5)
+            
+            # Do not retry 404 or 403
+            if response.status_code in (404, 403):
+                print(f"Client error {response.status_code} for {url}. Skipping retries.")
+                return response, False
+            
+            if response.status_code != 200:
+                print(f"Attempt {attempt}: Server error {response.status_code} for {url}.")
+                if attempt < max_retries:
+                    time.sleep(1) # wait before retry
+                    continue
+                return response, False
+                
+            return response, True
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Attempt {attempt}: Request failed for {url} due to error: {e}")
+            if attempt < max_retries:
+                time.sleep(1)
+                continue
+            return None, False
+            
+    return None, False
 
 def get_or_cache_page(url, cache_filename, delay=0.5):
-    """Retrieve page content from cache or fetch live with politeness."""
+    """Retrieve page content from cache or fetch live with retry logic & politeness."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_file = os.path.join(CACHE_DIR, cache_filename)
     
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
-            return f.read(), True
+            return f.read(), True, False # content, cached=True, failed=False
     else:
-        html_content = polite_get(url)
-        if html_content:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                f.write(html_content)
-            time.sleep(delay)
-        return html_content, False
+        response, success = polite_get_with_retry(url)
+        if not success or not response:
+            return None, False, True # failed=True
+            
+        html_content = response.text
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        time.sleep(delay) # Be polite between live requests
+        
+        return html_content, False, False
 
 def parse_price(price_text):
     """Clean price string like '£51.77' into float 51.77."""
     if not price_text:
         return 0.0
-    # Remove currency symbols (handling potential encoding quirks like Â£ or £)
     cleaned = price_text.replace("£", "").replace("Â", "").strip()
     try:
         return float(cleaned)
@@ -69,12 +89,12 @@ def parse_price(price_text):
         return 0.0
 
 def scrape_book_details(book_url, source_page_url, index):
-    """Visit an individual book page and extract the raw fields."""
+    """Visit an individual book page and extract the raw fields safely."""
     cache_name = f"book-{index}.html"
-    html_content, _ = get_or_cache_page(book_url, cache_name)
+    html_content, cached, failed = get_or_cache_page(book_url, cache_name)
     
-    if not html_content:
-        return None
+    if failed or not html_content:
+        return None, True
 
     soup = BeautifulSoup(html_content, "html.parser")
     
@@ -111,20 +131,34 @@ def scrape_book_details(book_url, source_page_url, index):
         "source_page": source_page_url,
         "fetched_at": datetime.now(timezone.utc).isoformat()
     }
-    return record
+    return record, False
 
-def run_pipeline():
+def run_pipeline(inject_fake_url=False):
+    start_time = datetime.now(timezone.utc)
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     current_url = PAGE_1_URL
     all_book_links = []
+    pages_fetched_count = 0
+    cache_hits_count = 0
+    failed_pages_count = 0
     
     # 1. Discover catalogue pages & book links
     for page_num in range(1, 4):
         cache_name = f"catalogue-page-{page_num}.html"
-        html_content, _ = get_or_cache_page(current_url, cache_name)
-        if not html_content:
+        cache_file = os.path.join(CACHE_DIR, cache_name)
+        was_cached = os.path.exists(cache_file)
+        
+        html_content, cached, failed = get_or_cache_page(current_url, cache_name)
+        
+        if was_cached or cached:
+            cache_hits_count += 1
+        else:
+            pages_fetched_count += 1
+            
+        if failed or not html_content:
+            failed_pages_count += 1
             break
             
         soup = BeautifulSoup(html_content, "html.parser")
@@ -151,23 +185,40 @@ def run_pipeline():
             seen.add(book_url)
             unique_books.append((book_url, source_url))
 
-    print(f"Discovered {len(unique_books)} unique book URLs. Processing records...")
+    # Optional checkpoint test: inject one deliberately broken/fake book URL
+    if inject_fake_url:
+        unique_books.append(("https://books.toscrape.com/catalogue/non-existent-book_999/index.html", PAGE_1_URL))
+        print("-> Injected 1 fake URL for failure testing.")
+
+    print(f"Processing {len(unique_books)} book URLs safely...")
 
     valid_records = []
     error_records = []
-    
-    # Track canonical URLs for idempotency uniqueness dictionary
     stored_books = {}
 
     for idx, (book_url, source_url) in enumerate(unique_books, start=1):
-        raw_record = scrape_book_details(book_url, source_url, idx)
-        if not raw_record:
+        # Check cache for book detail
+        cache_name = f"book-{idx}.html"
+        cache_file = os.path.join(CACHE_DIR, cache_name)
+        was_cached = os.path.exists(cache_file)
+        
+        raw_record, failed = scrape_book_details(book_url, source_url, idx)
+        
+        if was_cached:
+            cache_hits_count += 1
+        else:
+            pages_fetched_count += 1
+
+        if failed or not raw_record:
+            failed_pages_count += 1
+            error_records.append({
+                "url": book_url,
+                "error": "Page fetch failed or returned non-200 status"
+            })
             continue
 
         # Normalize price
         price_gbp = parse_price(raw_record["price_text"])
-        
-        # Build normalized record dictionary matching Pydantic schema
         normalized_data = {
             **raw_record,
             "price_gbp": price_gbp
@@ -176,7 +227,6 @@ def run_pipeline():
         # Validate with Pydantic
         try:
             validated_book = BookRecord(**normalized_data)
-            # Idempotency check using canonical product_url as unique key
             stored_books[validated_book.product_url] = validated_book.model_dump()
         except ValidationError as e:
             error_records.append({
@@ -184,12 +234,14 @@ def run_pipeline():
                 "error": str(e)
             })
 
-    # Convert dictionary values back to list ensuring unique 60 records
     valid_records = list(stored_books.values())
+    end_time = datetime.now(timezone.utc)
+    duration_seconds = (end_time - start_time).total_seconds()
 
-    # Save to output files
+    # Save output files
     books_file = os.path.join(OUTPUT_DIR, "books.json")
     errors_file = os.path.join(OUTPUT_DIR, "errors.json")
+    report_file = os.path.join(OUTPUT_DIR, "run-report.json")
 
     with open(books_file, "w", encoding="utf-8") as f:
         json.dump(valid_records, f, indent=2, ensure_ascii=False)
@@ -197,11 +249,24 @@ def run_pipeline():
     with open(errors_file, "w", encoding="utf-8") as f:
         json.dump(error_records, f, indent=2, ensure_ascii=False)
 
-    print(f"\n--- Stage 4 Summary ---")
-    print(f"Valid records stored in {books_file}: {len(valid_records)}")
-    print(f"Invalid records stored in {errors_file}: {len(error_records)}")
+    run_report = {
+        "start_time": start_time.isoformat(),
+        "duration_seconds": round(duration_seconds, 2),
+        "pages_fetched": pages_fetched_count,
+        "cache_hits": cache_hits_count,
+        "valid_records": len(valid_records),
+        "invalid_records": len(error_records),
+        "failed_pages": failed_pages_count
+    }
 
-    return valid_records
+    with open(report_file, "w", encoding="utf-8") as f:
+        json.dump(run_report, f, indent=2)
+
+    print(f"\n--- Stage 5 Run Report ---")
+    print(json.dumps(run_report, indent=2))
+
+    return run_report
 
 if __name__ == "__main__":
-    run_pipeline()
+    # Test normal run first, or pass inject_fake_url=True to test the failure checkpoint!
+    run_pipeline(inject_fake_url=True)
